@@ -1,45 +1,90 @@
 #!/bin/bash
 
-if [ "${UPDATE_ON_BOOT}" = true ]; then
+dirExists() {
+    local path="$1"
+    local return_val=0
+    if ! [ -d "${path}" ]; then
+        echo "${path} does not exist."
+        return_val=1
+    fi
+    return "$return_val"
+}
+
+fileExists() {
+    local path="$1"
+    local return_val=0
+    if ! [ -f "${path}" ]; then
+        echo "${path} does not exist."
+        return_val=1
+    fi
+    return "$return_val"
+}
+
+isReadable() {
+    local path="$1"
+    local return_val=0
+    if ! [ -e "${path}" ]; then
+        echo "${path} is not readable."
+        return_val=1
+    fi
+    return "$return_val"
+}
+
+isWritable() {
+    local path="$1"
+    local return_val=0
+    if ! [ -w "${path}" ]; then
+        echo "${path} is not writable."
+        return_val=1
+    fi
+    return "$return_val"
+}
+
+isExecutable() {
+    local path="$1"
+    local return_val=0
+    if ! [ -x "${path}" ]; then
+        echo "${path} is not executable."
+        return_val=1
+    fi
+    return "$return_val"
+}
+
+dirExists "/palworld" || exit
+isWritable "/palworld" || exit
+isExecutable "/palworld" || exit
+
+cd /palworld || exit
+
+if [ "${UPDATE_ON_BOOT,,}" = true ]; then
     printf "\e[0;32m*****STARTING INSTALL/UPDATE*****\e[0m\n"
-    /home/steam/steamcmd/steamcmd.sh +force_install_dir "/palworld" +login anonymous +app_update 2394010 validate +quit
+    /home/steam/steamcmd/steamcmd.sh +@sSteamCmdForcePlatformType linux +@sSteamCmdForcePlatformBitness 64 +force_install_dir "/palworld" +login anonymous +app_update 2394010 validate +quit
 fi
 
 STARTCOMMAND=("./PalServer.sh")
 
+if ! fileExists "${STARTCOMMAND[0]}"; then
+    echo "Try restarting with UPDATE_ON_BOOT=true"
+    exit 1
+fi
+isReadable "${STARTCOMMAND[0]}" || exit
+isExecutable "${STARTCOMMAND[0]}" || exit
+
 if [ -n "${PORT}" ]; then
     STARTCOMMAND+=("-port=${PORT}")
-fi
-
-if [ -n "${SERVER_NAME}" ]; then
-    STARTCOMMAND+=("-servername=${SERVER_NAME}")
-fi
-
-if [ -n "${SERVER_DESCRIPTION}" ]; then
-    STARTCOMMAND+=("-serverdescription=${SERVER_DESCRIPTION}")
-fi
-
-if [ -n "${SERVER_PASSWORD}" ]; then
-    STARTCOMMAND+=("-serverpassword=${SERVER_PASSWORD}")
-fi
-
-if [ -n "${ADMIN_PASSWORD}" ]; then
-    STARTCOMMAND+=("-adminpassword=${ADMIN_PASSWORD}")
 fi
 
 if [ -n "${QUERY_PORT}" ]; then
     STARTCOMMAND+=("-queryport=${QUERY_PORT}")
 fi
 
-if [ "${COMMUNITY}" = true ]; then
+if [ "${COMMUNITY,,}" = true ]; then
     STARTCOMMAND+=("EpicApp=PalServer")
 fi
 
-if [ "${MULTITHREADING}" = true ]; then
+if [ "${MULTITHREADING,,}" = true ]; then
     STARTCOMMAND+=("-useperfthreads" "-NoAsyncLoadingThread" "-UseMultithreadForDS")
 fi
-
-cd /palworld || exit
 
 printf "\e[0;32m*****CHECKING FOR EXISTING CONFIG*****\e[0m\n"
 
@@ -56,11 +101,39 @@ if [ ! "$(grep -s '[^[:space:]]' /palworld/Pal/Saved/Config/LinuxServer/PalWorld
     cp /palworld/DefaultPalWorldSettings.ini /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
 
+fileExists "/palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini" || exit
+isWritable "/palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini" || exit
+
+escape_sed() {
+    printf '%s\n' "$1" | sed -e 's:[][\/.^$*]:\\&:g'
+}
+
+if [ -n "${SERVER_NAME}" ]; then
+    SERVER_NAME=$(escape_sed "$SERVER_NAME" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
+    echo "SERVER_NAME=${SERVER_NAME}"
+    sed -E -i "s/ServerName=\"[^\"]*\"/ServerName=\"$SERVER_NAME\"/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
+fi
+if [ -n "${SERVER_DESCRIPTION}" ]; then
+    SERVER_DESCRIPTION=$(escape_sed "$SERVER_DESCRIPTION" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
+    echo "SERVER_DESCRIPTION=${SERVER_DESCRIPTION}"
+    sed -E -i "s/ServerDescription=\"[^\"]*\"/ServerDescription=\"$SERVER_DESCRIPTION\"/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
+fi
+if [ -n "${SERVER_PASSWORD}" ]; then
+    SERVER_PASSWORD=$(sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" <<< "$SERVER_PASSWORD")
+    echo "SERVER_PASSWORD=${SERVER_PASSWORD}"
+    sed -E -i "s/ServerPassword=\"[^\"]*\"/ServerPassword=\"$SERVER_PASSWORD\"/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
+fi
+if [ -n "${ADMIN_PASSWORD}" ]; then
+    ADMIN_PASSWORD=$(sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" <<< "$ADMIN_PASSWORD")
+    echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" 
+    sed -E -i "s/AdminPassword=\"[^\"]*\"/AdminPassword=\"$ADMIN_PASSWORD\"/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
+fi
 if [ -n "${PLAYERS}" ]; then
     echo "PLAYERS=${PLAYERS}"
-     sed -E -i "s/ServerPlayerMaxNum=[0-9]*/ServerPlayerMaxNum=$PLAYERS/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
+    sed -E -i "s/ServerPlayerMaxNum=[0-9]*/ServerPlayerMaxNum=$PLAYERS/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
 if [ -n "${PUBLIC_IP}" ]; then
+    PUBLIC_IP=$(sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" <<< "$PUBLIC_IP")
     echo "PUBLIC_IP=${PUBLIC_IP}"
     sed -E -i "s/PublicIP=\"[^\"]*\"/PublicIP=\"$PUBLIC_IP\"/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
@@ -269,6 +342,7 @@ if [ -n "${COOP_PLAYER_MAX_NUM}" ]; then
     sed -E -i "s/CoopPlayerMaxNum=[0-9]*/CoopPlayerMaxNum=$COOP_PLAYER_MAX_NUM/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
 if [ -n "${REGION}" ]; then
+    REGION=$(sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" <<< "$REGION")
     echo "REGION=$REGION"
     sed -E -i "s/Region=\"[^\"]*\"/Region=\"$REGION\"/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
@@ -277,11 +351,12 @@ if [ -n "${USEAUTH}" ]; then
     sed -E -i "s/bUseAuth=[a-zA-Z]*/bUseAuth=$USEAUTH/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
 if [ -n "${BAN_LIST_URL}" ]; then
+    BAN_LIST_URL=$(sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" <<< "$BAN_LIST_URL")
     echo "BAN_LIST_URL=$BAN_LIST_URL"
     sed -E -i "s~BanListURL=\"[^\"]*\"~BanListURL=\"$BAN_LIST_URL\"~" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
-if [ -n "${RCON_ENABLED}" ]; then
-    echo "RCON_ENABLED=${RCON_ENABLED}"
+if [ -n "${RCON_ENABLED,,}" ]; then
+    echo "RCON_ENABLED=${RCON_ENABLED,,}"
     sed -i "s/RCONEnabled=[a-zA-Z]*/RCONEnabled=$RCON_ENABLED/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
 if [ -n "${RCON_PORT}" ]; then
@@ -289,14 +364,36 @@ if [ -n "${RCON_PORT}" ]; then
     sed -i "s/RCONPort=[0-9]*/RCONPort=$RCON_PORT/" /palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
 fi
 
+rm -f  "/home/steam/server/crontab"
+if [ "${BACKUP_ENABLED,,}" = true ]; then
+    echo "BACKUP_ENABLED=${BACKUP_ENABLED,,}"
+    
+    echo "$BACKUP_CRON_EXPRESSION bash /usr/local/bin/backup" >> "/home/steam/server/crontab"
+fi
+
+if [ "${AUTO_UPDATE_ENABLED,,}" = true ] && [ "${UPDATE_ON_BOOT}" = true ]; then
+    echo "AUTO_UPDATE_ENABLED=${AUTO_UPDATE_ENABLED,,}"
+    echo "$AUTO_UPDATE_CRON_EXPRESSION bash /usr/local/bin/update" >> "/home/steam/server/crontab"
+fi
+
+if [ "${AUTO_REBOOT_ENABLED,,}" = true ] && [ "${RCON_ENABLED,,}" = true ]; then
+    echo "AUTO_REBOOT_ENABLED=${AUTO_REBOOT_ENABLED,,}"
+    echo "$AUTO_REBOOT_CRON_EXPRESSION bash /home/steam/server/auto_reboot.sh" >> "/home/steam/server/crontab"
+fi
+
+if { [ "${AUTO_UPDATE_ENABLED,,}" = true ] && [ "${UPDATE_ON_BOOT,,}" = true ]; } || [ "${BACKUP_ENABLED,,}" = true ] || \
+    [ "${AUTO_REBOOT_ENABLED,,}" = true ]; then
+    supercronic "/home/steam/server/crontab" &
+fi
+
 # Configure RCON settings
 cat >/home/steam/server/rcon.yaml  <<EOL
 default:
   address: "127.0.0.1:${RCON_PORT}"
-  password: ${ADMIN_PASSWORD}
+  password: "${ADMIN_PASSWORD}"
 EOL
 
 printf "\e[0;32m*****STARTING SERVER*****\e[0m\n"
 echo "${STARTCOMMAND[*]}"
 "${STARTCOMMAND[@]}"
-
+exit 0
